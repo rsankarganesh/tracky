@@ -47,12 +47,12 @@ import {
 const MANUAL_KEYS = {
   GEMINI_API_KEY: "", // Paste Gemini Key here (e.g. "AIzaSy...")
   FIREBASE_CONFIG: {
-    apiKey: "",             // Paste apiKey
-    authDomain: "",         // Paste authDomain
-    projectId: "",          // Paste projectId
-    storageBucket: "",      // Paste storageBucket
-    messagingSenderId: "",  // Paste messagingSenderId
-    appId: ""               // Paste appId
+    apiKey: "AIzaSyAkrpaa7uHDYljNkWNjBp_we5ZZnT_hlaM",             // Paste apiKey
+    authDomain: "trackyapp-14839.firebaseapp.com",         // Paste authDomain
+    projectId: "trackyapp-14839",          // Paste projectId
+    storageBucket: "trackyapp-14839.firebasestorage.app",      // Paste storageBucket
+    messagingSenderId: "460862348820",  // Paste messagingSenderId
+    appId: "1:460862348820:web:16f2d362ccc4ab0f2f5101"               // Paste appId
   }
 };
 
