@@ -1,4 +1,23 @@
 import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  onAuthStateChanged,
+  signInWithCustomToken
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  deleteDoc, 
+  doc, 
+  onSnapshot, 
+  updateDoc, 
+  serverTimestamp,
+  query, 
+  orderBy 
+} from 'firebase/firestore';
 import { 
   Plus, 
   Trash2, 
@@ -6,31 +25,209 @@ import {
   ExternalLink, 
   Activity, 
   Search, 
+  AlertCircle, 
+  CheckCircle2, 
   Clock, 
   Globe, 
   MousePointer2, 
+  Sparkles, 
+  Bot, 
   X, 
   Pencil, 
   Save 
 } from 'lucide-react';
 
-// --- COMPONENT: CARD ---
+// --- CONFIGURATION START ---
+
+/* INSTRUCTIONS:
+   1. Go to console.firebase.google.com -> Project Settings -> General -> Scroll down to "Your apps" -> Copy the config object.
+   2. Go to a.i.google.dev -> Get API Key.
+   3. Paste them inside the quotes below.
+*/
+const MANUAL_KEYS = {
+  GEMINI_API_KEY: "", // Paste Gemini Key here (e.g. "AIzaSy...")
+  FIREBASE_CONFIG: {
+    apiKey: "",             // Paste apiKey
+    authDomain: "",         // Paste authDomain
+    projectId: "",          // Paste projectId
+    storageBucket: "",      // Paste storageBucket
+    messagingSenderId: "",  // Paste messagingSenderId
+    appId: ""               // Paste appId
+  }
+};
+
+// Logic to choose between .env variables (if available) or Manual Keys
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || MANUAL_KEYS.GEMINI_API_KEY;
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || MANUAL_KEYS.FIREBASE_CONFIG.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || MANUAL_KEYS.FIREBASE_CONFIG.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || MANUAL_KEYS.FIREBASE_CONFIG.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || MANUAL_KEYS.FIREBASE_CONFIG.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || MANUAL_KEYS.FIREBASE_CONFIG.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || MANUAL_KEYS.FIREBASE_CONFIG.appId
+};
+
+// --- CONFIGURATION END ---
+
+// Initialize Firebase safely
+let app, auth, db;
+const appId = "web-sentinel-v1"; // Static ID for your data collection
+
+try {
+  if (firebaseConfig.apiKey) {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+  }
+} catch (e) {
+  console.error("Firebase init error:", e);
+}
+
+// --- Gemini API Helper ---
+const callGemini = async (prompt) => {
+  if (!apiKey) return "API Key missing. Please add it to src/App.jsx";
+  
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      }
+    );
+
+    if (!response.ok) throw new Error('Gemini API call failed');
+    const data = await response.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || "No analysis available.";
+  } catch (error) {
+    console.error("AI Error:", error);
+    return "AI service is currently unavailable.";
+  }
+};
+
+// --- Components ---
+
+const AiSelectorModal = ({ isOpen, onClose, onSelect }) => {
+  const [htmlInput, setHtmlInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!isOpen) return null;
+
+  const handleAnalyze = async () => {
+    if (!htmlInput.trim()) return;
+    setLoading(true);
+    setError('');
+
+    const prompt = `
+      I have a snippet of HTML. I need a robust CSS selector to target the most meaningful content within it (like a price, status, or title).
+      Return ONLY the CSS selector string. Do not include markdown formatting or explanations.
+      HTML Snippet:
+      ${htmlInput}
+    `;
+
+    try {
+      const result = await callGemini(prompt);
+      const cleanSelector = result.replace(/`/g, '').trim(); 
+      onSelect(cleanSelector);
+      onClose();
+    } catch (err) {
+      setError('Failed to analyze HTML. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-gradient-to-r from-indigo-50 to-white">
+          <div className="flex items-center gap-2 text-indigo-700">
+            <Sparkles size={20} />
+            <h3 className="font-semibold">AI Selector Finder</h3>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div className="p-6 flex-1 overflow-y-auto">
+          <p className="text-sm text-slate-600 mb-4">
+            Paste a snippet of HTML code below (Right-click element &gt; Inspect &gt; Right-click HTML &gt; Copy &gt; Copy OuterHTML). Gemini will extract the best CSS selector for you.
+          </p>
+          <textarea
+            className="w-full h-40 p-3 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none resize-none"
+            placeholder='<div class="product-price" id="p-123">$49.99</div>'
+            value={htmlInput}
+            onChange={(e) => setHtmlInput(e.target.value)}
+          />
+          {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
+        </div>
+
+        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
+          <button 
+            onClick={onClose}
+            className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg text-sm font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={handleAnalyze}
+            disabled={loading || !htmlInput}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? <RefreshCw className="animate-spin" size={16} /> : <Bot size={16} />}
+            {loading ? 'Analyzing...' : 'Generate Selector'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const MonitorCard = ({ monitor, onDelete, onEdit, onCheck }) => {
   const [isChecking, setIsChecking] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
 
   const handleCheck = async () => {
     setIsChecking(true);
-    // Fake delay to feel like it's working
-    setTimeout(() => {
-      onCheck(monitor);
-      setIsChecking(false);
-    }, 800);
+    setAnalysis(null);
+    await onCheck(monitor);
+    setTimeout(() => setIsChecking(false), 800);
   };
 
-  const timeAgo = (dateString) => {
-    if (!dateString) return 'Never checked';
-    const date = new Date(dateString);
-    const seconds = Math.floor((new Date() - date) / 1000);
+  const handleAnalyzeChange = async () => {
+    if (!monitor.lastValue) return;
+    setAnalyzing(true);
+    
+    // Simulate previous value for context 
+    const mockPreviousValue = "Different Value"; 
+
+    const prompt = `
+      Analyze the change in this website monitor data. 
+      Item Name: "${monitor.name}"
+      Previous Value: "${mockPreviousValue}" (Contextual guess)
+      New Value: "${monitor.lastValue}"
+      
+      Write a short, fun, 1-sentence notification summary for the user. 
+      If the price went down, be excited. If stock returned, be urgent.
+    `;
+
+    const result = await callGemini(prompt);
+    setAnalysis(result);
+    setAnalyzing(false);
+  };
+
+  const timeAgo = (timestamp) => {
+    if (!timestamp) return 'Never checked';
+    const seconds = Math.floor((new Date() - timestamp.toDate()) / 1000);
     if (seconds < 60) return 'Just now';
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m ago`;
@@ -58,10 +255,18 @@ const MonitorCard = ({ monitor, onDelete, onEdit, onCheck }) => {
           </div>
         </div>
         <div className="flex gap-1 shrink-0 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-           <button onClick={() => onEdit(monitor)} className="p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-blue-500 transition-colors">
+           <button 
+            onClick={() => onEdit(monitor)}
+            className="p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-blue-500 transition-colors"
+            title="Edit Monitor"
+          >
             <Pencil size={16} />
           </button>
-          <button onClick={() => onDelete(monitor.id)} className="p-2 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
+          <button 
+            onClick={() => onDelete(monitor.id)}
+            className="p-2 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
+            title="Delete Monitor"
+          >
             <Trash2 size={16} />
           </button>
         </div>
@@ -85,91 +290,127 @@ const MonitorCard = ({ monitor, onDelete, onEdit, onCheck }) => {
             onClick={handleCheck}
             disabled={isChecking}
             className={`absolute bottom-2 right-2 p-1.5 rounded-full bg-white shadow-sm border border-slate-200 hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-all ${isChecking ? 'animate-spin' : ''}`}
-            title="Simulate Check"
+            title="Simulate Check (Generates Mock Data)"
           >
             <RefreshCw size={14} />
           </button>
         </div>
+
+        {/* AI Analysis Result */}
+        {analysis && (
+          <div className="bg-indigo-50 text-indigo-800 p-3 rounded-lg text-sm border border-indigo-100 animate-in fade-in slide-in-from-top-2">
+            <div className="flex gap-2 items-start">
+              <Sparkles size={14} className="mt-0.5 shrink-0" />
+              <p>{analysis}</p>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-between text-xs pt-2">
           <div className="flex items-center gap-1.5 text-slate-500">
             <Clock size={14} />
             <span>{timeAgo(monitor.lastChecked)}</span>
           </div>
-          {monitor.status === 'changed' && (
-              <span className="flex items-center gap-1 text-amber-600 bg-amber-50 px-2 py-1 rounded-full font-medium">
-                Changed
+          
+          <div className="flex gap-2">
+            {monitor.status === 'changed' && !analysis && (
+               <button 
+                 onClick={handleAnalyzeChange}
+                 disabled={analyzing}
+                 className="flex items-center gap-1 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-full font-medium transition-colors disabled:opacity-50"
+               >
+                 {analyzing ? <RefreshCw size={12} className="animate-spin"/> : <Sparkles size={12} />}
+                 Analyze
+               </button>
+            )}
+
+            {monitor.status === 'stable' && (
+              <span className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full font-medium">
+                <CheckCircle2 size={12} /> Stable
               </span>
-          )}
+            )}
+            {monitor.status === 'changed' && (
+              <span className="flex items-center gap-1 text-amber-600 bg-amber-50 px-2 py-1 rounded-full font-medium">
+                <AlertCircle size={12} /> Changed
+              </span>
+            )}
+            {monitor.status === 'new' && (
+              <span className="flex items-center gap-1 text-blue-600 bg-blue-50 px-2 py-1 rounded-full font-medium">
+                <Activity size={12} /> New
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
 };
 
-// --- MAIN APP ---
 export default function App() {
+  const [user, setUser] = useState(null);
   const [monitors, setMonitors] = useState([]);
+  const [loading, setLoading] = useState(true);
   
   // Form State
-  const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [url, setUrl] = useState('');
   const [selector, setSelector] = useState('');
   const [name, setName] = useState('');
   const [manualValue, setManualValue] = useState(''); 
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
 
-  // 1. Load data from LocalStorage when app starts
   useEffect(() => {
-    const saved = localStorage.getItem('tracky_monitors');
-    if (saved) {
-      setMonitors(JSON.parse(saved));
+    if (!auth) {
+        setLoading(false);
+        return;
     }
+
+    const initAuth = async () => {
+       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+           await signInWithCustomToken(auth, __initial_auth_token);
+       } else {
+           await signInAnonymously(auth);
+       }
+    };
+    initAuth();
+    
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
   }, []);
 
-  // 2. Save data to LocalStorage whenever monitors list changes
   useEffect(() => {
-    localStorage.setItem('tracky_monitors', JSON.stringify(monitors));
-  }, [monitors]);
+    if (!user || !db) return;
+    
+    const q = query(
+        collection(db, 'artifacts', appId, 'users', user.uid, 'monitors')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      data.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      setMonitors(data);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching monitors:", error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const resetForm = () => {
-    setUrl(''); setSelector(''); setName(''); setManualValue('');
-    setEditingId(null); setIsFormOpen(false);
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!name) return;
-
-    const now = new Date().toISOString();
-
-    if (editingId) {
-      // Edit existing
-      setMonitors(monitors.map(m => {
-        if (m.id === editingId) {
-          return {
-            ...m,
-            url, selector, name,
-            lastValue: manualValue || m.lastValue,
-            lastChecked: manualValue ? now : m.lastChecked,
-            status: manualValue ? 'changed' : m.status
-          };
-        }
-        return m;
-      }));
-    } else {
-      // Create new
-      const newMonitor = {
-        id: Date.now().toString(), // Simple ID based on time
-        url, selector, name,
-        lastValue: null,
-        lastChecked: null,
-        status: 'new',
-        createdAt: now
-      };
-      setMonitors([newMonitor, ...monitors]);
-    }
-    resetForm();
+    setUrl('');
+    setSelector('');
+    setName('');
+    setManualValue('');
+    setEditingId(null);
+    setIsFormOpen(false);
   };
 
   const handleEditClick = (monitor) => {
@@ -182,41 +423,126 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleDelete = (id) => {
-    if (confirm("Delete this monitor?")) {
-      setMonitors(monitors.filter(m => m.id !== id));
-      if (editingId === id) resetForm();
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!url || !selector || !name) return;
+    if (!db || !user) {
+        alert("Database connection not ready.");
+        return;
+    }
+
+    try {
+      if (editingId) {
+        const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'monitors', editingId);
+        
+        const updateData = {
+            url,
+            selector,
+            name,
+            updatedAt: serverTimestamp()
+        };
+
+        if (manualValue) {
+             updateData.lastValue = manualValue;
+             updateData.lastChecked = serverTimestamp();
+             updateData.status = 'stable';
+        }
+
+        await updateDoc(docRef, updateData);
+
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'monitors'), {
+          url,
+          selector,
+          name,
+          lastValue: null,
+          lastChecked: null,
+          status: 'new',
+          createdAt: serverTimestamp()
+        });
+      }
+      resetForm();
+    } catch (err) {
+      console.error("Error saving monitor:", err);
     }
   };
 
-  // The "Fake" checker logic
-  const simulateCheck = (monitor) => {
-    const possibleValues = ["$49.99", "In Stock", "Out of Stock", "UNREGISTERED", "REGISTERED"];
-    const randomValue = possibleValues[Math.floor(Math.random() * possibleValues.length)];
-    
-    setMonitors(monitors.map(m => {
-      if (m.id === monitor.id) {
-        return {
-          ...m,
-          lastValue: randomValue,
-          lastChecked: new Date().toISOString(),
-          status: 'changed'
-        };
-      }
-      return m;
-    }));
+  const handleDelete = async (id) => {
+    if (!confirm('Stop tracking this item?')) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'monitors', id));
+      if (editingId === id) resetForm();
+    } catch (err) {
+      console.error("Error deleting:", err);
+    }
   };
 
+  const simulateCheck = async (monitor) => {
+    const possibleValues = [
+      "$49.99", 
+      "In Stock", 
+      "Out of Stock", 
+      "UNREGISTERED", 
+      "REGISTERED"
+    ];
+    
+    const newValue = possibleValues[Math.floor(Math.random() * possibleValues.length)];
+    const status = (monitor.lastValue && monitor.lastValue !== newValue) ? 'changed' : 'stable';
+
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'monitors', monitor.id), {
+        lastValue: newValue,
+        lastChecked: serverTimestamp(),
+        status: status
+      });
+    } catch (err) {
+      console.error("Error updating monitor:", err);
+    }
+  };
+
+  if (!auth) {
+     return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+            <div className="bg-red-50 p-6 rounded-xl border border-red-100 max-w-md w-full shadow-sm">
+                <h1 className="text-xl font-bold text-red-600 mb-2 flex items-center gap-2">
+                    <AlertCircle /> Configuration Needed
+                </h1>
+                <p className="text-slate-700 mb-4 text-sm">
+                    This app requires Firebase keys to run. 
+                </p>
+                <div className="text-xs bg-white p-3 rounded border border-red-200 font-mono text-slate-500 overflow-x-auto">
+                    Please paste your keys into the <strong>MANUAL_KEYS</strong> section in <strong>src/App.jsx</strong>.
+                </div>
+            </div>
+        </div>
+     );
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="animate-spin text-blue-600">
+          <RefreshCw size={32} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20">
-      {/* Header */}
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+      <AiSelectorModal 
+        isOpen={isAiModalOpen} 
+        onClose={() => setIsAiModalOpen(false)} 
+        onSelect={(newSelector) => setSelector(newSelector)}
+      />
+
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="bg-blue-600 p-1.5 rounded-lg text-white">
               <Activity size={20} />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-800">Tracky <span className="text-xs font-normal text-slate-400 border border-slate-200 rounded px-1">Offline Mode</span></h1>
+            <h1 className="text-xl font-bold tracking-tight text-slate-800">Tracky</h1>
           </div>
           <button 
             onClick={() => {
@@ -226,7 +552,7 @@ export default function App() {
             className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors shadow-sm ${isFormOpen ? 'bg-slate-200 text-slate-700' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
           >
             {isFormOpen ? <X size={18} /> : <Plus size={18} />}
-            {isFormOpen ? 'Cancel' : 'Add'}
+            {isFormOpen ? 'Cancel' : 'Add Monitor'}
           </button>
         </div>
       </header>
@@ -235,36 +561,86 @@ export default function App() {
         
         {isFormOpen && (
           <div className="mb-8 animate-in slide-in-from-top-4 fade-in duration-300">
-            <div className="bg-white rounded-xl shadow-lg border border-blue-100 p-6">
-              <h2 className="text-lg font-semibold mb-4 text-slate-800">
-                  {editingId ? 'Edit Monitor' : 'New Monitor'}
+            <div className="bg-white rounded-xl shadow-lg border border-blue-100 p-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4 opacity-10">
+                {editingId ? <Pencil size={120} /> : <Activity size={120} />}
+              </div>
+              
+              <h2 className="text-lg font-semibold mb-4 text-slate-800 relative z-10">
+                  {editingId ? 'Edit Tracker' : 'Configure New Tracker'}
               </h2>
-              <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-1">Friendly Name</label>
-                  <input type="text" required className="w-full px-4 py-2 rounded-lg border border-slate-300" value={name} onChange={(e) => setName(e.target.value)} />
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="e.g. Survey Registration Status"
+                    className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
                 </div>
                 
                 <div className="md:col-span-1">
                   <label className="block text-sm font-medium text-slate-700 mb-1">Target URL</label>
-                  <input type="url" required className="w-full px-4 py-2 rounded-lg border border-slate-300" value={url} onChange={(e) => setUrl(e.target.value)} />
+                  <input 
+                    type="url" 
+                    required
+                    placeholder="https://example.com/product"
+                    className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                  />
                 </div>
 
                 <div className="md:col-span-1">
                   <label className="block text-sm font-medium text-slate-700 mb-1">CSS Selector</label>
-                  <input type="text" required className="w-full px-4 py-2 rounded-lg border border-slate-300 font-mono text-sm" value={selector} onChange={(e) => setSelector(e.target.value)} />
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="e.g. .status-label or #register-status"
+                      className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all font-mono text-sm"
+                      value={selector}
+                      onChange={(e) => setSelector(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsAiModalOpen(true)}
+                      className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap"
+                      title="Use AI to find selector"
+                    >
+                      <Sparkles size={16} />
+                      <span className="text-sm font-medium">AI Helper</span>
+                    </button>
+                  </div>
                 </div>
 
                 {editingId && (
                     <div className="md:col-span-2 bg-slate-50 p-4 rounded-lg border border-slate-200 mt-2">
-                         <label className="block text-sm font-medium text-slate-700 mb-1">Manual Status Update</label>
-                         <input type="text" className="w-full px-4 py-2 rounded-lg border border-slate-300 bg-white" value={manualValue} onChange={(e) => setManualValue(e.target.value)} placeholder="Type new value here..." />
+                         <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+                            Manual Status Update 
+                            <span className="text-xs font-normal text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">Optional</span>
+                         </label>
+                         <p className="text-xs text-slate-500 mb-2">Since the app cannot auto-scrape due to browser security, paste the current value here if you want to update it manually.</p>
+                         <input 
+                            type="text" 
+                            placeholder="e.g. UNREGISTERED"
+                            className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all bg-white"
+                            value={manualValue}
+                            onChange={(e) => setManualValue(e.target.value)}
+                         />
                     </div>
                 )}
 
                 <div className="md:col-span-2 flex justify-end mt-2 gap-2">
-                  <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg font-medium flex items-center gap-2">
-                    <Save size={18} /> Save
+                  <button 
+                    type="submit" 
+                    className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2"
+                  >
+                    <Save size={18} />
+                    {editingId ? 'Save Changes' : 'Start Monitoring'}
                   </button>
                 </div>
               </form>
@@ -272,14 +648,29 @@ export default function App() {
           </div>
         )}
 
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-700">Active Monitors ({monitors.length})</h2>
+          {monitors.length > 0 && (
+             <div className="text-xs text-slate-500 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100 flex items-center gap-2">
+               <AlertCircle size={14} className="text-blue-500"/>
+               Simulation Mode: Auto-scraping is simulated. Use Edit to update manually.
+             </div>
+          )}
+        </div>
+
         {monitors.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-300">
             <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400">
               <Search size={32} />
             </div>
             <h3 className="text-lg font-medium text-slate-800 mb-2">No monitors yet</h3>
-            <p className="text-slate-500 mb-6">Your data is saved safely on this device.</p>
-            <button onClick={() => setIsFormOpen(true)} className="text-blue-600 font-medium hover:text-blue-800">
+            <p className="text-slate-500 max-w-sm mx-auto mb-6">
+              Add a website URL and a CSS selector to start tracking changes in prices, text, or availability.
+            </p>
+            <button 
+              onClick={() => setIsFormOpen(true)}
+              className="text-blue-600 font-medium hover:text-blue-800"
+            >
               Create your first monitor &rarr;
             </button>
           </div>
@@ -289,7 +680,7 @@ export default function App() {
               <MonitorCard 
                 key={monitor.id} 
                 monitor={monitor} 
-                onDelete={() => handleDelete(monitor.id)}
+                onDelete={handleDelete}
                 onEdit={handleEditClick}
                 onCheck={simulateCheck}
               />
