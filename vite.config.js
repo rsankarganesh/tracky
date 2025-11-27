@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+    import react from '@vitejs/plugin-react'
 
-export default defineConfig({
-  plugins: [react()],
-  base: "/tracky/", 
-})
+    // https://vitejs.dev/config/
+    export default defineConfig({
+      plugins: [react()],
+      // This ensures assets are looked for in /tracky/assets/ not /assets/
+      base: "/tracky/", 
+    })
