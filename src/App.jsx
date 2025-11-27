@@ -37,59 +37,75 @@ import {
   Save 
 } from 'lucide-react';
 
-// --- CONFIGURATION ---
+// --- CONFIGURATION HELPER ---
 
-/* SECURITY NOTE:
-   To avoid GitHub security alerts, keep the keys inside MANUAL_KEYS empty!
-   Instead, create a .env file in your project root and add them there:
-   VITE_GEMINI_API_KEY=AIzaSy...
+/* GITHUB SECURITY NOTE:
+   Do not paste keys directly here if you plan to commit this file to GitHub.
+   Use a .env file in your project root.
 */
 
-const MANUAL_KEYS = {
-  GEMINI_API_KEY: "", 
-  FIREBASE_CONFIG: {
-    apiKey: "",             
-    authDomain: "",         
-    projectId: "",          
-    storageBucket: "",      
-    messagingSenderId: "",  
-    appId: ""               
-  }
-};
-
-// Safe Environment Variable Access
-const getEnv = (key) => {
-  try {
-    // Check if we are in a Vite environment
-    if (import.meta && import.meta.env) {
-      return import.meta.env[key];
+const getAppConfig = () => {
+  // Fallback for manual entry if .env fails
+  const MANUAL_KEYS = {
+    GEMINI_API_KEY: "", 
+    FIREBASE_CONFIG: {
+      apiKey: "",             
+      authDomain: "",         
+      projectId: "",          
+      storageBucket: "",      
+      messagingSenderId: "",  
+      appId: ""               
     }
+  };
+
+  let env = {};
+  
+  // Try to get Vite environment variables
+  // We wrap this in a try-catch or check to prevent preview environment crashes
+  try {
+    // Vite replaces these static strings at build time
+    env = {
+      apiKey: import.meta.env.VITE_GEMINI_API_KEY,
+      firebase: {
+        apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+        authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+        projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+        storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+        messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+        appId: import.meta.env.VITE_FIREBASE_APP_ID
+      }
+    };
   } catch (e) {
-    // Ignore errors in environments that don't support import.meta
+    console.warn("Environment variables not loaded via import.meta.env");
   }
-  return "";
+
+  // Merge: Use Env Vars if available, otherwise Manual Keys
+  return {
+    geminiKey: env.apiKey || MANUAL_KEYS.GEMINI_API_KEY,
+    firebaseConfig: {
+      apiKey: env.firebase?.apiKey || MANUAL_KEYS.FIREBASE_CONFIG.apiKey,
+      authDomain: env.firebase?.authDomain || MANUAL_KEYS.FIREBASE_CONFIG.authDomain,
+      projectId: env.firebase?.projectId || MANUAL_KEYS.FIREBASE_CONFIG.projectId,
+      storageBucket: env.firebase?.storageBucket || MANUAL_KEYS.FIREBASE_CONFIG.storageBucket,
+      messagingSenderId: env.firebase?.messagingSenderId || MANUAL_KEYS.FIREBASE_CONFIG.messagingSenderId,
+      appId: env.firebase?.appId || MANUAL_KEYS.FIREBASE_CONFIG.appId
+    }
+  };
 };
 
-const apiKey = getEnv("VITE_GEMINI_API_KEY") || MANUAL_KEYS.GEMINI_API_KEY;
-
-const firebaseConfig = {
-  apiKey: getEnv("VITE_FIREBASE_API_KEY") || MANUAL_KEYS.FIREBASE_CONFIG.apiKey,
-  authDomain: getEnv("VITE_FIREBASE_AUTH_DOMAIN") || MANUAL_KEYS.FIREBASE_CONFIG.authDomain,
-  projectId: getEnv("VITE_FIREBASE_PROJECT_ID") || MANUAL_KEYS.FIREBASE_CONFIG.projectId,
-  storageBucket: getEnv("VITE_FIREBASE_STORAGE_BUCKET") || MANUAL_KEYS.FIREBASE_CONFIG.storageBucket,
-  messagingSenderId: getEnv("VITE_FIREBASE_MESSAGING_SENDER_ID") || MANUAL_KEYS.FIREBASE_CONFIG.messagingSenderId,
-  appId: getEnv("VITE_FIREBASE_APP_ID") || MANUAL_KEYS.FIREBASE_CONFIG.appId
-};
-
-// Initialize Firebase safely
-let app, auth, db;
+// --- GLOBAL INIT ---
+const config = getAppConfig();
 const appId = "web-sentinel-v1"; // Static ID for your data collection
 
+let app, auth, db;
+
 try {
-  if (firebaseConfig.apiKey) {
-    app = initializeApp(firebaseConfig);
+  if (config.firebaseConfig.apiKey) {
+    app = initializeApp(config.firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+  } else {
+    console.log("Firebase Config missing. App will start in offline/config mode.");
   }
 } catch (e) {
   console.error("Firebase init error:", e);
@@ -97,11 +113,11 @@ try {
 
 // --- Gemini API Helper ---
 const callGemini = async (prompt) => {
-  if (!apiKey) return "API Key missing. Check .env file.";
+  if (!config.geminiKey) return "API Key missing. Check .env file.";
   
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${config.geminiKey}`,
       {
         method: 'POST',
         headers: {
@@ -372,6 +388,7 @@ export default function App() {
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
 
   useEffect(() => {
+    // Only try to auth if we have an auth instance
     if (!auth) {
         setLoading(false);
         return;
@@ -438,7 +455,7 @@ export default function App() {
     e.preventDefault();
     if (!url || !selector || !name) return;
     if (!db || !user) {
-        alert("Database connection not ready.");
+        alert("Database connection not ready. Check API keys.");
         return;
     }
 
@@ -522,7 +539,9 @@ export default function App() {
                     This app requires Firebase keys to run. 
                 </p>
                 <div className="text-xs bg-white p-3 rounded border border-red-200 font-mono text-slate-500 overflow-x-auto">
-                   Please create a <strong>.env</strong> file in your project root with your API keys.
+                   1. Ensure your <strong>.env</strong> file exists in the project root.<br/>
+                   2. Ensure variables start with <strong>VITE_</strong>.<br/>
+                   3. Run <strong>npm run deploy</strong> again to rebuild.
                 </div>
             </div>
         </div>
