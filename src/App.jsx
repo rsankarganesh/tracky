@@ -37,38 +37,49 @@ import {
   Save 
 } from 'lucide-react';
 
-// --- CONFIGURATION START ---
+// --- CONFIGURATION ---
 
-/* INSTRUCTIONS:
-   1. Go to console.firebase.google.com -> Project Settings -> General -> Scroll down to "Your apps" -> Copy the config object.
-   2. Go to a.i.google.dev -> Get API Key.
-   3. Paste them inside the quotes below.
+/* SECURITY NOTE:
+   To avoid GitHub security alerts, keep the keys inside MANUAL_KEYS empty!
+   Instead, create a .env file in your project root and add them there:
+   VITE_GEMINI_API_KEY=AIzaSy...
 */
+
 const MANUAL_KEYS = {
-  GEMINI_API_KEY: "", // Paste Gemini Key here (e.g. "AIzaSy...")
+  GEMINI_API_KEY: "", 
   FIREBASE_CONFIG: {
-    apiKey: "AIzaSyAkrpaa7uHDYljNkWNjBp_we5ZZnT_hlaM",             // Paste apiKey
-    authDomain: "trackyapp-14839.firebaseapp.com",         // Paste authDomain
-    projectId: "trackyapp-14839",          // Paste projectId
-    storageBucket: "trackyapp-14839.firebasestorage.app",      // Paste storageBucket
-    messagingSenderId: "460862348820",  // Paste messagingSenderId
-    appId: "1:460862348820:web:16f2d362ccc4ab0f2f5101"               // Paste appId
+    apiKey: "",             
+    authDomain: "",         
+    projectId: "",          
+    storageBucket: "",      
+    messagingSenderId: "",  
+    appId: ""               
   }
 };
 
-// Logic to choose between .env variables (if available) or Manual Keys
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || MANUAL_KEYS.GEMINI_API_KEY;
-
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || MANUAL_KEYS.FIREBASE_CONFIG.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || MANUAL_KEYS.FIREBASE_CONFIG.authDomain,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || MANUAL_KEYS.FIREBASE_CONFIG.projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || MANUAL_KEYS.FIREBASE_CONFIG.storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || MANUAL_KEYS.FIREBASE_CONFIG.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || MANUAL_KEYS.FIREBASE_CONFIG.appId
+// Safe Environment Variable Access
+const getEnv = (key) => {
+  try {
+    // Check if we are in a Vite environment
+    if (import.meta && import.meta.env) {
+      return import.meta.env[key];
+    }
+  } catch (e) {
+    // Ignore errors in environments that don't support import.meta
+  }
+  return "";
 };
 
-// --- CONFIGURATION END ---
+const apiKey = getEnv("VITE_GEMINI_API_KEY") || MANUAL_KEYS.GEMINI_API_KEY;
+
+const firebaseConfig = {
+  apiKey: getEnv("VITE_FIREBASE_API_KEY") || MANUAL_KEYS.FIREBASE_CONFIG.apiKey,
+  authDomain: getEnv("VITE_FIREBASE_AUTH_DOMAIN") || MANUAL_KEYS.FIREBASE_CONFIG.authDomain,
+  projectId: getEnv("VITE_FIREBASE_PROJECT_ID") || MANUAL_KEYS.FIREBASE_CONFIG.projectId,
+  storageBucket: getEnv("VITE_FIREBASE_STORAGE_BUCKET") || MANUAL_KEYS.FIREBASE_CONFIG.storageBucket,
+  messagingSenderId: getEnv("VITE_FIREBASE_MESSAGING_SENDER_ID") || MANUAL_KEYS.FIREBASE_CONFIG.messagingSenderId,
+  appId: getEnv("VITE_FIREBASE_APP_ID") || MANUAL_KEYS.FIREBASE_CONFIG.appId
+};
 
 // Initialize Firebase safely
 let app, auth, db;
@@ -86,7 +97,7 @@ try {
 
 // --- Gemini API Helper ---
 const callGemini = async (prompt) => {
-  if (!apiKey) return "API Key missing. Please add it to src/App.jsx";
+  if (!apiKey) return "API Key missing. Check .env file.";
   
   try {
     const response = await fetch(
@@ -511,7 +522,7 @@ export default function App() {
                     This app requires Firebase keys to run. 
                 </p>
                 <div className="text-xs bg-white p-3 rounded border border-red-200 font-mono text-slate-500 overflow-x-auto">
-                    Please paste your keys into the <strong>MANUAL_KEYS</strong> section in <strong>src/App.jsx</strong>.
+                   Please create a <strong>.env</strong> file in your project root with your API keys.
                 </div>
             </div>
         </div>
